@@ -1,1 +1,444 @@
+# Sozopia Map Tile Generation Guide
 
+This guide explains how to generate map tiles for the **Sozopia marketplace map** in the simplest way.
+
+---
+
+## Step 1: Prepare Map Image
+
+- Use **one image only**
+- Size must be **18000 × 18000 pixels**
+- Format: **JPG or PNG**
+
+Example:
+
+```
+finalmap_grid.jpg
+```
+
+---
+
+## Step 2: Convert Image to GeoTIFF
+
+Run the following command to convert the image into a GeoTIFF file:
+
+```bash
+gdal_translate -of GTiff \
+-a_srs EPSG:3857 \
+-a_ullr -20037508.34 20037508.34 20037508.34 -20037508.34 \
+D:\map\finalmap_grid.jpg \
+D:\map\finalmap_grid_output.tif
+```
+
+Output file:
+
+```
+finalmap_grid_output.tif
+```
+
+---
+
+## Step 3: Generate Map Tiles
+
+Run the tile generation script:
+
+```bash
+python run.py
+```
+
+Input:
+
+```
+finalmap_grid_output.tif
+```
+
+---
+
+## Step 4: Use the Tiles
+
+- Map tiles are generated automatically
+- Use them in Sozopia map viewer (Leaflet or other web map libraries)
+
+---
+
+## Summary
+
+```
+Image (18000×18000)
+→ GeoTIFF
+→ Map Tiles
+```
+
+Done ✅
+
+Expanation about Frontend(Map Section) of marketplace in frontend:
+
+### Key Concepts
+
+#### CRS.Simple Coordinate System
+
+The map uses Leaflet's `CRS.Simple` coordinate system, which is a non-geographic coordinate system where:
+
+- Coordinates are in `[y, x]` format (note: Y comes first!)
+- Y increases upward (opposite of screen coordinates)
+- Bounds format: `[[minY, minX], [maxY, maxX]]`
+- Center format: `[y, x]`
+- Perfect for custom maps with pixel coordinates
+
+#### Coordinate Conversion
+
+The system uses a custom interval of `0.7111` pixels between rectangle centers:
+
+- Grid coordinates (x, y) are converted to CRS.Simple bounds
+- Conversion happens in `src/lib/utils/coordinator.ts`
+- Formula: `y = -x * interval` and `x = y * interval`
+
+## File Structure
+
+```
+src/app/map/
+├── page.tsx                    # Main map page component
+├── config/
+│   └── mapConfig.ts           # Map configuration (zoom, bounds, colors)
+├── components/
+│   ├── MapRectangles.tsx      # Interactive grid cells/rectangles
+│   ├── MapRectangles.css      # Rectangle styling and animations
+│   ├── SimpleTileLayer.tsx    # Custom tile layer with Y-coordinate flipping
+│   ├── MiniMap.tsx            # Minimap component for navigation
+│   ├── Sidebar.tsx            # Side panel showing land parcel details
+│   └── Legend.tsx             # Status legend component
+├── data/
+│   ├── mockpoints.json        # Grid cell coordinates (x, y)
+│   ├── map_grid.json          # Full grid data (large file)
+│   ├── mockRectangles.json    # Rectangle configurations
+│   └── remove_positions.json  # Positions to exclude
+├── utils/
+│   ├── coordinateConverter.ts # EPSG3857 ↔ CRS.Simple conversions
+│   ├── gridDataUtils.ts       # Grid data utilities
+│   └── viewportDataLoader.ts  # Viewport-based data loading
+└── hooks/
+    └── useCoordinateConverter.ts # Coordinate conversion hooks
+
+src/lib/utils/
+└── coordinator.ts             # Grid coordinate ↔ CRS.Simple bounds conversion
+```
+
+## Core Components
+
+### 1. Map Page (`page.tsx`)
+
+The main entry point that orchestrates all map components.
+
+**Key Responsibilities:**
+
+- Manages map state (selected cells, sidebar visibility)
+- Handles rectangle click events
+- Generates mock data for selected cells
+- Renders the MapContainer with all child components
+
+**Key State:**
+
+```typescript
+const [sidebarOpen, setSidebarOpen] = useState(false);
+const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
+const [crs, setCrs] = useState<any>(null); // CRS.Simple instance
+```
+
+**Key Functions:**
+
+- `handleRectClick(coord)` - Called when a rectangle is clicked
+- `generateMockGridData(x, y)` - Creates mock data for a grid cell
+
+### 2. MapRectangles (`components/MapRectangles.tsx`)
+
+Renders interactive grid cells that represent land parcels.
+
+**Key Features:**
+
+- Only visible at zoom levels 5-6 (performance optimization)
+- Hover and selection states with visual feedback
+- Click handlers for cell selection
+- Pulse animation for selected cells
+
+**Rectangle Configuration:**
+
+```typescript
+interface RectangleConfig {
+  bounds: [[number, number], [number, number]]; // CRS.Simple format
+  pathOptions?: {
+    fillColor?: string;
+    fillOpacity?: number;
+    color?: string;
+    weight?: number;
+  };
+}
+```
+
+### 3. SimpleTileLayer (`components/SimpleTileLayer.tsx`)
+
+Custom tile layer that handles Y-coordinate flipping for CRS.Simple.
+
+**Why it's needed:**
+
+- CRS.Simple has Y increasing upward
+- TMS tiles have Y increasing downward
+- This component flips Y: `flippedY = maxY - coords.y`
+
+**Tile URL Format:**
+
+- Path: `/output_tiles_final_grid/{z}/{x}/{y}.jpg`
+- Uses TMS (Tile Map Service) format
+
+### 4. MiniMap (`components/MiniMap.tsx`)
+
+Provides a navigational minimap in the bottom-left corner.
+
+**Configuration:**
+
+- Position: `bottomleft`
+- Size: 200x250px
+- Zoom offset: -5
+- Shows current viewport indicator
+
+### 5. Sidebar (`components/Sidebar.tsx`)
+
+Displays detailed information about a selected land parcel.
+
+**Displays:**
+
+- Land image/thumbnail
+- Token ID
+- Type, Rarity, Status
+- Price (if for sale)
+- Owner and Creator addresses
+- Land attributes (water level, sandiness, slots, etc.)
+- Buy button (if available)
+
+### 6. MapConfig (`config/mapConfig.ts`)
+
+Central configuration for all map settings.
+
+**Key Settings:**
+
+```typescript
+{
+  defaultCenter: [-125, 120],      // [y, x] in CRS.Simple
+  defaultZoom: 5,
+  minZoom: 2,
+  maxZoom: 6,
+  maxBounds: [[0, 0], [-260, 260]], // [[minY, minX], [maxY, maxX]]
+  grid: {
+    size: 400,
+    cellSizePixels: 5,
+    interval: 0.7111,
+  }
+}
+```
+
+## Development Workflow
+
+### Setting Up the Development Environment
+
+1. **Install Dependencies**
+
+   ```bash
+   npm install
+   # or
+   pnpm install
+   ```
+
+2. **Start Development Server**
+
+   ```bash
+   npm run dev
+   # or
+   pnpm dev
+   ```
+
+3. **Navigate to Map**
+   - Visit `http://localhost:3000/map`
+
+### Adding New Grid Cells
+
+1. **Update Coordinate Data**
+
+   - Add coordinates to `src/app/map/data/mockpoints.json`
+   - Format: `[{ "x": number, "y": number }, ...]`
+
+2. **The coordinates are automatically converted**
+   - `coordinateConverter()` in `coordinator.ts` converts grid coords to CRS.Simple bounds
+   - Conversion formula uses interval `0.7111`
+
+### Modifying Rectangle Appearance
+
+**Update Styles:**
+
+- Edit `components/MapRectangles.css` for animations and effects
+- Modify `pathOptions` in `MapRectangles.tsx` for default/hover/selected states
+
+**Example:**
+
+```typescript
+// Default state
+pathOptions: {
+  fillColor: "#EEEEEE9A",
+  fillOpacity: 0.7,
+  color: "#E2E2E2FF",
+  weight: 2
+}
+
+// Selected state (in getPathOptions())
+fillColor: "#FFFDFDF5",
+fillOpacity: 0.8,
+color: "#E2E2E2FF",
+weight: 3
+```
+
+### Adding Custom Tile Layers
+
+1. **Update Tile Path**
+
+   - Change `tileLayerUrl` in `mapConfig.ts`
+   - Or modify the `url` prop in `SimpleTileLayer` component
+
+2. **Ensure TMS Format**
+   - Tiles should be organized as: `{z}/{x}/{y}.jpg`
+   - Place tiles in `public/output_tiles_final_grid/` directory
+
+### Handling Cell Selection
+
+**Flow:**
+
+1. User clicks rectangle → `MapRectangles` fires `onRectClick`
+2. `page.tsx` receives click → `handleRectClick(coord)`
+3. Generate/load cell data → `generateMockGridData(x, y)`
+4. Update state → `setSelectedCell(cell)`
+5. Open sidebar → `setSidebarOpen(true)`
+
+**To customize selection behavior:**
+
+- Modify `handleRectClick` in `page.tsx`
+- Update `generateMockGridData` to fetch real data instead of mock data
+- Customize `Sidebar` component to display different information
+
+## Coordinate System Deep Dive
+
+### Grid Coordinates → CRS.Simple Bounds
+
+**Conversion Function** (`coordinator.ts`):
+
+```typescript
+const interval = 0.7111;
+const bounds = [
+  [-1 * (x - 1) * interval, (y - 1) * interval], // minY, minX
+  [-1 * x * interval, y * interval], // maxY, maxX
+];
+```
+
+**Example:**
+
+- Grid coordinate: `{ x: 100, y: 50 }`
+- CRS.Simple bounds: `[[-70.389, 34.805], [-71.11, 35.555]]`
+
+### Reverse Conversion (Bounds → Grid)
+
+**Formula:**
+
+```typescript
+const x = -bound[1][0] / interval; // From maxY
+const y = bound[1][1] / interval; // From maxX
+```
+
+### Why the Negative Sign?
+
+CRS.Simple uses Y increasing upward, but our grid system might use a different convention. The negative sign flips the Y-axis to match.
+
+## Common Tasks
+
+### Changing Map Bounds
+
+Edit `mapConfig.ts`:
+
+```typescript
+maxBounds: [
+  [minY, minX], // Southwest corner
+  [maxY, maxX], // Northeast corner
+];
+```
+
+### Adjusting Zoom Levels
+
+```typescript
+defaultZoom: 5,    // Initial zoom
+minZoom: 2,        // Minimum zoom (zoomed out)
+maxZoom: 6,        // Maximum zoom (zoomed in)
+```
+
+### Showing Rectangles at Different Zoom Levels
+
+In `MapRectangles.tsx`, modify:
+
+```typescript
+const shouldShowRectangles = zoomLevel === 5 || zoomLevel === 6;
+// Change to: zoomLevel >= 4
+```
+
+### Customizing Sidebar Data
+
+Replace `generateMockGridData` with API call:
+
+```typescript
+const handleRectClick = async (coord: { x: number; y: number }) => {
+  const response = await fetch(`/api/land/${coord.x}/${coord.y}`);
+  const gridData = await response.json();
+  // ... set cell data
+};
+```
+
+### Adding New Land Types
+
+1. Update `generateMockGridData` types array
+2. Add corresponding images in `public/land/`
+3. Update `getImageByType` function
+4. Update `Legend.tsx` if needed
+
+### Performance Optimization
+
+**Current Optimizations:**
+
+- Rectangles only render at zoom levels 5-6
+- Dynamic imports for Leaflet components (SSR disabled)
+- Lazy loading of map components
+
+**For Large Datasets:**
+
+- Implement viewport-based rendering
+- Use `viewportDataLoader.ts` utilities
+- Consider virtual scrolling or pagination
+
+## Troubleshooting
+
+### Tiles Not Loading
+
+**Check:**
+
+1. Tile path matches `public/` directory structure
+2. Tiles are in TMS format (`{z}/{x}/{y}.jpg`)
+3. Y-coordinate flipping is working (check `SimpleTileLayer`)
+
+### Rectangles Not Appearing
+
+**Check:**
+
+1. Zoom level is 5 or 6
+2. `coordinateConverter` is being called correctly
+3. Bounds format is correct: `[[minY, minX], [maxY, maxX]]`
+4. Console for JavaScript errors
+
+### Coordinates Misaligned
+
+**Common Issues:**
+
+1. Y/X order confusion - remember CRS.Simple uses `[y, x]`
+2. Interval calculation - verify `0.7111` is correct for your grid
+3. Y-axis direction - CRS.Simple Y increases upward
